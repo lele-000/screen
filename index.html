@@ -7,11 +7,15 @@
 </head>
 <body>
     <h2>屏幕</h2>
-    <img id="screen" width="30%" height="auto">
+    <video id="screen" width="30%" height="auto" autoplay></video>
     <script>
         const ws = new WebSocket("ws://127.0.0.1:8080")
         ws.onmessage = (event) =>{
-            document.getElementById("screen").src = `data:image/png;base64,${event.data}`
+            const videoBlob = new Blob([event.data],{type:"video/mjpeg"})
+            const videoURL = URL.createObjectURL(videoBlob)
+            const videoElement = document.getElementById("screen")
+            videoElement.src = videoURL
+            videoElement.onended = () => URL.revokeObjectURL(videoURL)
         }
         ws.onclose = () =>{
             console.log("connection closed")
