@@ -10,7 +10,9 @@
     <video id="screen" width="30%" height="auto" autoplay></video>
     <script>
         const ws = new WebSocket("ws://127.0.0.1:8080")
+        ws.binaryType = "arraybuffer"
         ws.onmessage = (event) =>{
+            console.log(event)
             const videoBlob = new Blob([event.data],{type:"video/mjpeg"})
             const videoURL = URL.createObjectURL(videoBlob)
             const videoElement = document.getElementById("screen")
