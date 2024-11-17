@@ -10,10 +10,9 @@ wss.on("connection", (ws) => {
     ])
     const ffmpeg = spawn('ffmpeg',[
         '-i','pipe:0',
-        '-vf','fps=30',
-        '-loglevel','error',
-        '-f', 'image2pipe', 
-        '-vcodec', 'mjpeg', 
+        '-vf','scale=-1:-1',
+        '-f', 'mjpeg', 
+        '-c:v', 'mjpeg', 
         'pipe:1'
     ])
 
