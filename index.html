@@ -44,63 +44,65 @@
             console.log("WebSocket 已连接");
         };
 
+        let leftoverBuffer = new Uint8Array(0); // 缓存未完成的部分
+
         ws.onmessage = (event) => {
             const data = new Uint8Array(event.data);
 
-            // 确保有 NAL 单元分隔符
-            const dataWithSeparator = ensureNalSeparator(data);
+            // 拼接未完成的数据
+            const buffer = new Uint8Array(leftoverBuffer.length + data.length);
+            buffer.set(leftoverBuffer);
+            buffer.set(data, leftoverBuffer.length);
 
-            // 提取 NAL 单元类型
-            const nal_unit_type = dataWithSeparator[0] & 0x1F;
-            console.log("NAL Unit Type:", nal_unit_type);
+            // 分割 NAL 单元
+            const { nalUnits, remainingBuffer } = splitNalUnits(buffer);
+            leftoverBuffer = remainingBuffer;
 
-            // 处理 SPS 和 PPS
-            if (nal_unit_type === 7) {
-                console.log("收到完整的 SPS");
-                sps = dataWithSeparator;
-            } else if (nal_unit_type === 8) {
-                console.log("收到完整的 PPS");
-                pps = dataWithSeparator;
-            }
+            // 处理 NAL 单元
+            nalUnits.forEach((nalUnit) => {
+                const nalUnitType = nalUnit[0] & 0x1F; // 提取 NAL 单元类型
+                console.log("NAL Unit Type:", nalUnitType);
 
-            // 初始化解码器
-            if (sps && pps && !initialized) {
-                const spsPps = new Uint8Array([
-                    ...sps,
-                    ...pps,
-                ]);
-
-                videoDecoder.configure({
-                    codec: "avc1.64001F", // H.264 Baseline Profile，根据 SPS 修改
-                    description: spsPps,   // 提供 SPS 和 PPS 信息
-                    width: 1280,
-                    height: 720,
-                });
-
-                initialized = true;
-                console.log("解码器已初始化");
-            }
-
-            // 处理关键帧和非关键帧
-            if (nal_unit_type === 5 || nal_unit_type === 1) {
-                if (!initialized) {
-                    console.error("解码器未初始化，无法解码帧");
-                    return;
+                if (nalUnitType === 7) {
+                    console.log("收到完整的 SPS");
+                } else if (nalUnitType === 8) {
+                    console.log("收到完整的 PPS");
                 }
 
+                // 构建视频帧并解码
                 const chunk = new EncodedVideoChunk({
-                    type: nal_unit_type === 5 ? "key" : "delta",
+                    type: nalUnitType === 5 ? "key" : "delta",
                     timestamp: performance.now(),
-                    data: dataWithSeparator,
+                    data: nalUnit,
                 });
+                videoDecoder.decode(chunk);
+            });
+        };
 
-                try {
-                    videoDecoder.decode(chunk);
-                } catch (e) {
-                    console.error("解码失败：", e);
+        /**
+         * 分割 NAL 单元
+         * @param {Uint8Array} buffer - 输入数据流
+         * @returns {{ nalUnits: Uint8Array[], remainingBuffer: Uint8Array }}
+         */
+        function splitNalUnits(buffer) {
+            const nalSeparator = [0x00, 0x00, 0x00, 0x01];
+            const nalUnits = [];
+            let start = 0;
+
+            for (let i = 0; i <= buffer.length - nalSeparator.length; i++) {
+                if (buffer.slice(i, i + nalSeparator.length).every((v, j) => v === nalSeparator[j])) {
+                    if (start !== i) {
+                        nalUnits.push(buffer.slice(start, i));
+                    }
+                    start = i;
                 }
             }
-        };
+
+            return {
+                nalUnits,
+                remainingBuffer: buffer.slice(start),
+            };
+        }
 
         ws.onclose = () => {
             console.log("WebSocket 已断开");
