@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Save WebSocket Data</title>
+</head>
+<body>
+    <h1>WebSocket 数据保存到本地</h1>
+    <button id="saveButton" disabled>保存数据到本地</button>
+    <script>
+        const ws = new WebSocket("ws://127.0.0.1:8080");
+        ws.binaryType = "arraybuffer"; // 确保接收的是二进制数据
+
+        const chunks = []; // 用于存储接收到的数据块
+
+        ws.onopen = () => {
+            console.log("WebSocket 连接成功");
+        };
+
+        ws.onmessage = (event) => {
+            console.log("接收到数据块");
+            chunks.push(event.data); // 将数据块存储到数组中
+        };
+
+        ws.onclose = () => {
+            console.log("WebSocket 连接关闭");
+            document.getElementById("saveButton").disabled = false; // 启用保存按钮
+        };
+
+        ws.onerror = (error) => {
+            console.error("WebSocket 错误:", error);
+        };
+
+        // 保存数据到本地
+        document.getElementById("saveButton").onclick = () => {
+            // 将数据块合并成一个 Blob 对象
+            const blob = new Blob(chunks, { type: "application/octet-stream" });
+
+            // 创建一个下载链接
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = "websocket_data.h264"; // 指定下载文件名（可以根据需要更改扩展名）
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+
+            // 释放 URL 对象
+            URL.revokeObjectURL(url);
+        };
+    </script>
+</body>
+</html>

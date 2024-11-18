@@ -1,33 +1,111 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>H.264 解码播放</title>
 </head>
-<body>
-    <h2>屏幕</h2>
-    <img src="" alt="">
-    <script>
-        const ws = new WebSocket("ws://127.0.0.1:8080")
-        const img = document.querySelector("#img")
 
-        const chunks = []
-        ws.onopen = ()=>{
-            console.log("connected")
+<body>
+    <h1>H.264 数据播放</h1>
+    <canvas id="canvas" width="1280" height="720"></canvas>
+    <script>
+        const ws = new WebSocket("ws://127.0.0.1:8080");
+        ws.binaryType = "arraybuffer"; // 确保 WebSocket 接收二进制数据
+
+        const canvas = document.getElementById("canvas");
+        const ctx = canvas.getContext("2d");
+
+        let sps = null;
+        let pps = null;
+        let initialized = false;
+
+        // 创建解码器
+        const videoDecoder = new VideoDecoder({
+            output: (frame) => {
+                // 将解码后的帧绘制到 canvas 上
+                ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+                frame.close(); // 释放帧资源
+            },
+            error: (e) => console.error("解码错误：", e),
+        });
+
+        // 确保数据带有 NAL 单元分隔符
+        function ensureNalSeparator(data) {
+            if (data[0] !== 0x00 || data[1] !== 0x00 || data[2] !== 0x01) {
+                console.warn("缺少 NAL 单元分隔符，自动补充");
+                return new Uint8Array([0x00, 0x00, 0x00, 0x01, ...data]);
+            }
+            return data;
         }
-        ws.addEventListener("message",(event)=>{
-            // console.log("已接受",chunks)
-            chunks.push(event.data)
-            const blob = new Blob(chunks)
-            const url = URL.createObjectURL(blob)
-            img.src = url
-            chunks.pop()
-        })
-        
-        ws.onclose = () =>{
-            console.log("connection closed")
-        }
+
+        ws.onopen = () => {
+            console.log("WebSocket 已连接");
+        };
+
+        ws.onmessage = (event) => {
+            const data = new Uint8Array(event.data);
+
+            // 确保有 NAL 单元分隔符
+            const dataWithSeparator = ensureNalSeparator(data);
+
+            // 提取 NAL 单元类型
+            const nal_unit_type = dataWithSeparator[0] & 0x1F;
+            console.log("NAL Unit Type:", nal_unit_type);
+
+            // 处理 SPS 和 PPS
+            if (nal_unit_type === 7) {
+                console.log("收到完整的 SPS");
+                sps = dataWithSeparator;
+            } else if (nal_unit_type === 8) {
+                console.log("收到完整的 PPS");
+                pps = dataWithSeparator;
+            }
+
+            // 初始化解码器
+            if (sps && pps && !initialized) {
+                const spsPps = new Uint8Array([
+                    ...sps,
+                    ...pps,
+                ]);
+
+                videoDecoder.configure({
+                    codec: "avc1.64001F", // H.264 Baseline Profile，根据 SPS 修改
+                    description: spsPps,   // 提供 SPS 和 PPS 信息
+                    width: 1280,
+                    height: 720,
+                });
+
+                initialized = true;
+                console.log("解码器已初始化");
+            }
+
+            // 处理关键帧和非关键帧
+            if (nal_unit_type === 5 || nal_unit_type === 1) {
+                if (!initialized) {
+                    console.error("解码器未初始化，无法解码帧");
+                    return;
+                }
+
+                const chunk = new EncodedVideoChunk({
+                    type: nal_unit_type === 5 ? "key" : "delta",
+                    timestamp: performance.now(),
+                    data: dataWithSeparator,
+                });
+
+                try {
+                    videoDecoder.decode(chunk);
+                } catch (e) {
+                    console.error("解码失败：", e);
+                }
+            }
+        };
+
+        ws.onclose = () => {
+            console.log("WebSocket 已断开");
+        };
     </script>
 </body>
+
 </html>
