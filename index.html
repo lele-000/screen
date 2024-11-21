@@ -1,113 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>H.264 解码播放</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebSocket Video</title>
 </head>
-
 <body>
-    <h1>H.264 数据播放</h1>
-    <canvas id="canvas" width="1280" height="720"></canvas>
-    <script>
-        const ws = new WebSocket("ws://127.0.0.1:8080");
-        ws.binaryType = "arraybuffer"; // 确保 WebSocket 接收二进制数据
+  <video id="video" autoplay controls></video>
+  <script>
+    const video = document.getElementById("video");
+    const ws = new WebSocket("ws://localhost:8080");
 
-        const canvas = document.getElementById("canvas");
-        const ctx = canvas.getContext("2d");
+    ws.binaryType = "arraybuffer"; // 设置为二进制数据类型
 
-        let sps = null;
-        let pps = null;
-        let initialized = false;
+    const mediaSource = new MediaSource();
+    video.src = URL.createObjectURL(mediaSource);
 
-        // 创建解码器
-        const videoDecoder = new VideoDecoder({
-            output: (frame) => {
-                // 将解码后的帧绘制到 canvas 上
-                ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
-                frame.close(); // 释放帧资源
-            },
-            error: (e) => console.error("解码错误：", e),
-        });
+    mediaSource.addEventListener("sourceopen", () => {
+      const sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="avc1.42E01E"');
 
-        // 确保数据带有 NAL 单元分隔符
-        function ensureNalSeparator(data) {
-            if (data[0] !== 0x00 || data[1] !== 0x00 || data[2] !== 0x01) {
-                console.warn("缺少 NAL 单元分隔符，自动补充");
-                return new Uint8Array([0x00, 0x00, 0x00, 0x01, ...data]);
-            }
-            return data;
-        }
+      ws.onmessage = (event) => {
+        const data = new Uint8Array(event.data);
+        sourceBuffer.appendBuffer(data);
+      };
+    });
 
-        ws.onopen = () => {
-            console.log("WebSocket 已连接");
-        };
-
-        let leftoverBuffer = new Uint8Array(0); // 缓存未完成的部分
-
-        ws.onmessage = (event) => {
-            const data = new Uint8Array(event.data);
-
-            // 拼接未完成的数据
-            const buffer = new Uint8Array(leftoverBuffer.length + data.length);
-            buffer.set(leftoverBuffer);
-            buffer.set(data, leftoverBuffer.length);
-
-            // 分割 NAL 单元
-            const { nalUnits, remainingBuffer } = splitNalUnits(buffer);
-            leftoverBuffer = remainingBuffer;
-
-            // 处理 NAL 单元
-            nalUnits.forEach((nalUnit) => {
-                const nalUnitType = nalUnit[0] & 0x1F; // 提取 NAL 单元类型
-                console.log("NAL Unit Type:", nalUnitType);
-
-                if (nalUnitType === 7) {
-                    console.log("收到完整的 SPS");
-                } else if (nalUnitType === 8) {
-                    console.log("收到完整的 PPS");
-                }
-
-                // 构建视频帧并解码
-                const chunk = new EncodedVideoChunk({
-                    type: nalUnitType === 5 ? "key" : "delta",
-                    timestamp: performance.now(),
-                    data: nalUnit,
-                });
-                videoDecoder.decode(chunk);
-            });
-        };
-
-        /**
-         * 分割 NAL 单元
-         * @param {Uint8Array} buffer - 输入数据流
-         * @returns {{ nalUnits: Uint8Array[], remainingBuffer: Uint8Array }}
-         */
-        function splitNalUnits(buffer) {
-            const nalSeparator = [0x00, 0x00, 0x00, 0x01];
-            const nalUnits = [];
-            let start = 0;
-
-            for (let i = 0; i <= buffer.length - nalSeparator.length; i++) {
-                if (buffer.slice(i, i + nalSeparator.length).every((v, j) => v === nalSeparator[j])) {
-                    if (start !== i) {
-                        nalUnits.push(buffer.slice(start, i));
-                    }
-                    start = i;
-                }
-            }
-
-            return {
-                nalUnits,
-                remainingBuffer: buffer.slice(start),
-            };
-        }
-
-        ws.onclose = () => {
-            console.log("WebSocket 已断开");
-        };
-    </script>
+    ws.onclose = () => {
+      console.log("WebSocket connection closed");
+    };
+  </script>
 </body>
-
 </html>
